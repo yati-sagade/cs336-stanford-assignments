@@ -8,6 +8,7 @@ import numpy.typing as npt
 import torch
 from jaxtyping import Bool, Float, Int
 from torch import Tensor
+from cs336_basics.tokenization import BytePairEncodingTokenizer, TextChunker, pretokenize
 
 
 def run_linear(
@@ -562,6 +563,8 @@ def get_tokenizer(
     raise NotImplementedError
 
 
+
+
 def run_train_bpe(
     input_path: str | os.PathLike,
     vocab_size: int,
@@ -589,4 +592,12 @@ def run_train_bpe(
                 representing that <token1> was merged with <token2>.
                 Merges are ordered by order of creation.
     """
-    raise NotImplementedError
+    chunker = TextChunker(input_path=input_path, special_tokens=special_tokens)
+    pretokens = []
+    while (chunk := chunker.next_chunk()) is not None:
+        pretokens.extend(pretokenize(chunk))
+    bpe = BytePairEncodingTokenizer(
+        special_tokens=[t.encode("utf=8") for t in special_tokens], max_vocab_size=vocab_size
+    )
+    bpe.fit(pretokens)
+    return bpe.vocab(), bpe.merges()
