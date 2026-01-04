@@ -82,7 +82,7 @@ class BytePairEncodingTokenizer:
             for a, b in zip(pretoken_enc[:-1], pretoken_enc[1:]):
                 self._pair_postings[a, b].add(pretoken_idx)
                 self._pair_counts[a, b] += count
-        log.debug('*** BPE initialized, starting merges')
+        log.debug("*** BPE initialized, starting merges")
         imerge = 0
         while self._num_remaining_merges() > 0:
             log.debug(f"====== Merge round {imerge}")
@@ -109,7 +109,6 @@ class BytePairEncodingTokenizer:
         # log.debug(f"*** Going to merge pair {pformat(best_pair)}")
         best_pair_postings: list[TokenID] = self._pair_postings[best_pair].copy()
         for itok in best_pair_postings:
-            pretoken = self._corpus[itok]
             rewritten_pretoken = self._rewrite_pretoken(itok, best_pair, new_token_id)
             # log.debug(f"*** Rewrote {pretoken} to {rewritten_pretoken}")
             self._corpus[itok] = rewritten_pretoken
@@ -158,6 +157,7 @@ class BytePairEncodingTokenizer:
             self._pair_counts[a, b] += pretoken_count
         return tuple(merged)
 
+
 def find_chunk_boundaries(
     file: BinaryIO,
     desired_num_chunks: int,
@@ -204,6 +204,7 @@ def find_chunk_boundaries(
     # Make sure all boundaries are unique, but might be fewer than desired_num_chunks
     return sorted(set(chunk_boundaries))
 
+
 @dataclass
 class ChunkParams:
     input_path: str
@@ -212,20 +213,22 @@ class ChunkParams:
     limitpos: int
     special_tokens: list[str]
 
+
 def _process_chunk(input: tuple[int, ChunkParams]):
     idx, params = input
     pid = os.getpid()
+
     def _log(msg):
-        log.debug(f'[process {idx}/pid {pid}] {msg}')
+        log.debug(f"[process {idx}/pid {pid}] {msg}")
+
     spre = re.compile("|".join(map(re.escape, params.special_tokens)))
     _log(f"Chunk processing started on range {params.startpos}..{params.limitpos}")
     with open(params.input_path, "rb") as inp, open(params.output_path, "wb") as outp:
         inp.seek(params.startpos)
-        chunk = inp.read(params.limitpos-params.startpos).decode('utf-8')
+        chunk = inp.read(params.limitpos - params.startpos).decode("utf-8")
         _log(f"Read {len(chunk)} char long chunk")
         subchunks = spre.split(chunk)
         _log(f"Processing {len(subchunks)} sub-chunks")
-        ret = []
         finds = [PRETOK_PAT.finditer(subchunk) for subchunk in subchunks]
         for m in itertools.chain(*finds):
             b = m.group().encode("utf-8")
@@ -233,22 +236,28 @@ def _process_chunk(input: tuple[int, ChunkParams]):
             outp.write(b)
     _log(f"Chunk reading ended on range {params.startpos}..{params.limitpos}, wrote {params.output_path}")
 
-def read_pretokens(input_path: os.PathLike, separator: str, special_tokens: list[str], /, parallelism: int=8):
+
+def read_pretokens(input_path: os.PathLike, separator: str, special_tokens: list[str], /, parallelism: int = 8):
     with open(input_path, "rb") as fp:
         chunk_boundaries = find_chunk_boundaries(fp, parallelism, separator.encode("utf-8"))
         log.debug(f"Chunk boundaries for {input_path}: {chunk_boundaries} ({len(chunk_boundaries)} items)")
     tempdir = tempfile.TemporaryDirectory(delete=False)
-    chunk_inputs = [ChunkParams(input_path=input_path,
-                                output_path=os.path.join(tempdir.name, f"bpe-chunk-{startpos}-{limitpos}.txt"),
-                                startpos=startpos,
-                                limitpos=limitpos,
-                                special_tokens=special_tokens)
-                                for startpos, limitpos in zip(chunk_boundaries[:-1], chunk_boundaries[1:])]
+    chunk_inputs = [
+        ChunkParams(
+            input_path=input_path,
+            output_path=os.path.join(tempdir.name, f"bpe-chunk-{startpos}-{limitpos}.txt"),
+            startpos=startpos,
+            limitpos=limitpos,
+            special_tokens=special_tokens,
+        )
+        for startpos, limitpos in zip(chunk_boundaries[:-1], chunk_boundaries[1:])
+    ]
     with multiprocessing.Pool(parallelism) as p:
         tstart = time.time()
         p.map(_process_chunk, enumerate(chunk_inputs))
         tend = time.time()
-        log.debug(f"Pretokenization complete in {tend-tstart}s, parallelism={parallelism}")
+        log.debug(f"Pretokenization complete in {tend - tstart}s, parallelism={parallelism}")
+
     def _iter_file(path):
         with open(path, "rb") as fp:
             while True:
@@ -256,11 +265,13 @@ def read_pretokens(input_path: os.PathLike, separator: str, special_tokens: list
                 if not header:
                     break
                 assert len(header) == 4, f"Unexpected EOF in {path}"
-                length, = struct.unpack("<I", header)
+                (length,) = struct.unpack("<I", header)
                 pretoken = fp.read(length)
                 yield pretoken.decode("utf-8")
+
     gens = [_iter_file(chip.output_path) for chip in chunk_inputs]
     return itertools.chain(*gens), tempdir.cleanup
+
 
 if __name__ == "__main__":
     try:
@@ -270,6 +281,6 @@ if __name__ == "__main__":
     special_tokens = ["<|endoftext|>"]
     tok = BytePairEncodingTokenizer(num_merges=6, special_tokens=special_tokens)
     pretokens, cleanup = read_pretokens(data_path, "<|endoftext|>", ["<|endoftext|>"], parallelism=8)
-    log.debug('Pretokenization done, starting BPE training')
+    log.debug("Pretokenization done, starting BPE training")
     tok.fit(pretokens)
     cleanup()

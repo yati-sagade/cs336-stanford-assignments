@@ -49,7 +49,7 @@ def find_chunk_boundaries(
     return sorted(set(chunk_boundaries))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     ## Usage
     with open(..., "rb") as f:
         num_processes = 4

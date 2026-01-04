@@ -563,8 +563,6 @@ def get_tokenizer(
     raise NotImplementedError
 
 
-
-
 def run_train_bpe(
     input_path: str | os.PathLike,
     vocab_size: int,
