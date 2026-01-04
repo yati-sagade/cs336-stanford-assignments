@@ -590,9 +590,10 @@ def run_train_bpe(
                 representing that <token1> was merged with <token2>.
                 Merges are ordered by order of creation.
     """
-    pretokens = read_pretokens(input_path, "<|endoftext|>", special_tokens, parallelism=4)
+    pretokens, cleanup = read_pretokens(input_path, "<|endoftext|>", special_tokens, parallelism=4)
     bpe = BytePairEncodingTokenizer(
         special_tokens=[t.encode("utf-8") for t in special_tokens], max_vocab_size=vocab_size
     )
     bpe.fit(pretokens)
+    cleanup()
     return bpe.vocab(), bpe.merges()

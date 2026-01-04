@@ -283,8 +283,8 @@ if __name__ == "__main__":
     except IndexError:
         data_path = os.path.join(os.path.dirname(__file__), "..", "data/TinyStoriesV2-GPT4-valid.txt")
     special_tokens = ["<|endoftext|>"]
-    tok = BytePairEncodingTokenizer(num_merges=6, special_tokens=special_tokens)
     pretokens, cleanup = read_pretokens(data_path, "<|endoftext|>", ["<|endoftext|>"], parallelism=8)
     log.debug("Pretokenization done, starting BPE training")
+    tok = BytePairEncodingTokenizer(num_merges=6, special_tokens=special_tokens)
     tok.fit(pretokens)
     cleanup()
