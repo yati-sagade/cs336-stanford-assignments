@@ -241,6 +241,10 @@ def read_pretokens(input_path: os.PathLike, separator: str, special_tokens: list
     with open(input_path, "rb") as fp:
         chunk_boundaries = find_chunk_boundaries(fp, parallelism, separator.encode("utf-8"))
         log.debug(f"Chunk boundaries for {input_path}: {chunk_boundaries} ({len(chunk_boundaries)} items)")
+    # Each of the N (=parallelism) processes outputs pretokens in a separate file in a temp location.
+    # Each pretoken is encoded as:
+    #   <4-byte-little-endian-length><pretoken-utf-8-bytes>
+    # See _process_chunk().
     tempdir = tempfile.TemporaryDirectory(delete=False)
     chunk_inputs = [
         ChunkParams(
