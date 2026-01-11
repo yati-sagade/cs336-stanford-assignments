@@ -240,7 +240,7 @@ def _process_chunk(input: tuple[int, ChunkParams]):
     _log(f"Chunk reading ended on range {params.startpos}..{params.limitpos}, wrote {params.output_path}")
 
 
-def read_pretokens(input_path: os.PathLike, separator: str, special_tokens: list[str], /, parallelism: int = 8):
+def read_pretokens(input_path: os.PathLike, separator: str, special_tokens: list[str], /, parallelism: int = os.cpu_count()):
     with open(input_path, "rb") as fp:
         chunk_boundaries = find_chunk_boundaries(fp, parallelism, separator.encode("utf-8"))
         log.debug(f"Chunk boundaries for {input_path}: {chunk_boundaries} ({len(chunk_boundaries)} items)")
@@ -283,6 +283,7 @@ if __name__ == "__main__":
     ap.add_argument("output_dir")
     ap.add_argument("--overwrite", action="store_true", required=False, default=False)
     ap.add_argument("--max_vocab_size", type=int, required=True)
+    ap.add_argument("--pretok_parallelism", type=int, required=False, default=os.cpu_count())
     args = ap.parse_args()
 
     if os.path.exists(args.output_dir):
@@ -302,7 +303,7 @@ if __name__ == "__main__":
         log.debug("Starting pretokenization")
         t_start = time.time()
         pretokens, cleanup_pretoken_state = read_pretokens(
-            args.input_path, "<|endoftext|>", ["<|endoftext|>"], parallelism=8
+            args.input_path, "<|endoftext|>", ["<|endoftext|>"], parallelism=args.pretok_parallelism
         )
         cleanup_fns.append(cleanup_pretoken_state)
         t_end = time.time()
