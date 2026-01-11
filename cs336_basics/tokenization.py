@@ -282,6 +282,7 @@ if __name__ == "__main__":
     ap.add_argument("input_path")
     ap.add_argument("output_dir")
     ap.add_argument("--overwrite", action="store_true", required=False, default=False)
+    ap.add_argument("--max_vocab_size", type=int, required=True)
     args = ap.parse_args()
 
     if os.path.exists(args.output_dir):
@@ -309,7 +310,7 @@ if __name__ == "__main__":
 
         log.debug("Pretokenization done, starting BPE training")
         t_start = time.time()
-        tok = BytePairEncodingTokenizer(num_merges=6, special_tokens=special_tokens)
+        tok = BytePairEncodingTokenizer(max_vocab_size=args.max_vocab_size, special_tokens=special_tokens)
         tok.fit(pretokens)
         t_end = time.time()
         log.debug(f"BPE training done in {t_end - t_start:0.4f}s")
