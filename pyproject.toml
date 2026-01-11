@@ -21,6 +21,7 @@ dependencies = [
     "ty>=0.0.1a16",
     "scalene>=1.5.55",
     "ruff>=0.14.10",
+    "cbor2>=5.8.0",
 ]
 
 [build-system]

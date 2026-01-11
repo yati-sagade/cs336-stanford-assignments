@@ -1,3 +1,6 @@
+import cbor2
+import argparse
+import shutil
 import sys
 import os
 import logging
@@ -257,10 +260,7 @@ def read_pretokens(input_path: os.PathLike, separator: str, special_tokens: list
         for startpos, limitpos in zip(chunk_boundaries[:-1], chunk_boundaries[1:])
     ]
     with multiprocessing.Pool(parallelism) as p:
-        tstart = time.time()
         p.map(_process_chunk, enumerate(chunk_inputs))
-        tend = time.time()
-        log.debug(f"Pretokenization complete in {tend - tstart}s, parallelism={parallelism}")
 
     def _iter_file(path):
         with open(path, "rb") as fp:
@@ -278,13 +278,53 @@ def read_pretokens(input_path: os.PathLike, separator: str, special_tokens: list
 
 
 if __name__ == "__main__":
-    try:
-        data_path = sys.argv[1]
-    except IndexError:
-        data_path = os.path.join(os.path.dirname(__file__), "..", "data/TinyStoriesV2-GPT4-valid.txt")
+    ap = argparse.ArgumentParser()
+    ap.add_argument("input_path")
+    ap.add_argument("output_dir")
+    ap.add_argument("--overwrite", action="store_true", required=False, default=False)
+    args = ap.parse_args()
+
+    if os.path.exists(args.output_dir):
+        if args.overwrite:
+            print(f"*** Output dir {args.output_dir} already exists. REMOVING due to --overwrite.")
+            shutil.rmtree(args.output_dir)
+        else:
+            print(f"*** Output dir {args.output_dir} already exists, specify --overwrite to overwrite.")
+            sys.exit(1)
+    print(f"*** Creating {args.output_dir}")
+    os.makedirs(args.output_dir)
+
     special_tokens = ["<|endoftext|>"]
-    pretokens, cleanup = read_pretokens(data_path, "<|endoftext|>", ["<|endoftext|>"], parallelism=8)
-    log.debug("Pretokenization done, starting BPE training")
-    tok = BytePairEncodingTokenizer(num_merges=6, special_tokens=special_tokens)
-    tok.fit(pretokens)
-    cleanup()
+
+    cleanup_fns = []
+    try:
+        log.debug("Starting pretokenization")
+        t_start = time.time()
+        pretokens, cleanup_pretoken_state = read_pretokens(
+            args.input_path, "<|endoftext|>", ["<|endoftext|>"], parallelism=8
+        )
+        cleanup_fns.append(cleanup_pretoken_state)
+        t_end = time.time()
+        log.debug(f"Pretokenization done in {t_end - t_start:0.4f}s")
+
+        log.debug("Pretokenization done, starting BPE training")
+        t_start = time.time()
+        tok = BytePairEncodingTokenizer(num_merges=6, special_tokens=special_tokens)
+        tok.fit(pretokens)
+        t_end = time.time()
+        log.debug(f"BPE training done in {t_end - t_start:0.4f}s")
+
+        with open(os.path.join(args.output_dir, "vocab.cbor"), "wb") as out:
+            out.write(cbor2.dumps(tok.vocab()))
+
+        with open(os.path.join(args.output_dir, "merges.cbor"), "wb") as out:
+            out.write(cbor2.dumps(tok.merges()))
+
+    finally:
+        if cleanup_fns:
+            log.debug("Invoking cleanup handlers")
+            for fn in cleanup_fns:
+                try:
+                    fn()
+                except Exception as e:
+                    print(f"*** Exception while executing cleanup handler: {e}. Continuing with other handlers.")
