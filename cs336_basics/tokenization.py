@@ -222,7 +222,7 @@ def _process_chunk(input: tuple[int, ChunkParams]):
     pid = os.getpid()
 
     def _log(msg):
-        log.debug(f"[process {idx}/pid {pid}] {msg}")
+        print(f"[process {idx}/pid {pid}] {msg}")
 
     spre = re.compile("|".join(map(re.escape, params.special_tokens)))
     _log(f"Chunk processing started on range {params.startpos}..{params.limitpos}")
@@ -232,11 +232,12 @@ def _process_chunk(input: tuple[int, ChunkParams]):
         _log(f"Read {len(chunk)} char long chunk")
         subchunks = spre.split(chunk)
         _log(f"Processing {len(subchunks)} sub-chunks")
-        finds = [PRETOK_PAT.finditer(subchunk) for subchunk in subchunks]
-        for m in itertools.chain(*finds):
-            b = m.group().encode("utf-8")
-            outp.write(struct.pack("<I", len(b)))
-            outp.write(b)
+        for i, subchunk in enumerate(subchunks):
+            _log(f"Processing chunk {i+1}/{len(subchunks)}")
+            for m in PRETOK_PAT.finditer(subchunk):
+                b = m.group().encode("utf-8")
+                outp.write(struct.pack("<I", len(b)))
+                outp.write(b)
     _log(f"Chunk reading ended on range {params.startpos}..{params.limitpos}, wrote {params.output_path}")
 
 

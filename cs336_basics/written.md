@@ -32,3 +32,6 @@
   >>> [(c, c.encode('utf-8')) for c in 'नमस्ते']
   [('न', b'\xe0\xa4\xa8'), ('म', b'\xe0\xa4\xae'), ('स', b'\xe0\xa4\xb8'), ('्', b'\xe0\xa5\x8d'), ('त', b'\xe0\xa4\xa4'), ('े', b'\xe0\xa5\x87')]
   ```
+
+- Give a two byte sequence that does not decode to any Unicode character(s)
+  b'\x80\x80' does not decode (`UnicodeDecodeError: 'utf-8' codec can't decode byte 0x80 in position 0: invalid start byte`). I found this by trying to encode a few strings, and found that the 1->2 byte transition happens starting at the codepoint '\x80' (so the code point '\x7f' is encoded as b'\x7f', but '\x80' encodes to b'\xc2\x80'). This suggests that having the top bit set signals something
