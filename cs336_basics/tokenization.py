@@ -1,3 +1,4 @@
+import codecs
 import cbor2
 import argparse
 import shutil
@@ -223,22 +224,47 @@ def _process_chunk(input: tuple[int, ChunkParams]):
 
     def _log(msg):
         print(f"[process {idx}/pid {pid}] {msg}")
+    if os.environ.get('LOG_LEVEL', '').lower() != 'debug':
+        _log = lambda *args, **kwargs: None
 
     spre = re.compile("|".join(map(re.escape, params.special_tokens)))
     _log(f"Chunk processing started on range {params.startpos}..{params.limitpos}")
-    with open(params.input_path, "rb") as inp, open(params.output_path, "wb") as outp:
+    nbytes_to_read = params.limitpos - params.startpos
+    assert nbytes_to_read > 0, f"Empty chunk assigned to process {idx}/pid {pid}. params: {params}"
+    total_read = 0
+    dec = codecs.getincrementaldecoder("utf-8")()
+    with open(params.input_path, "rb") as inp,\
+            open(params.output_path, "wb") as outp:
         inp.seek(params.startpos)
-        chunk = inp.read(params.limitpos - params.startpos).decode("utf-8")
-        _log(f"Read {len(chunk)} char long chunk")
-        subchunks = spre.split(chunk)
-        _log(f"Processing {len(subchunks)} sub-chunks")
-        for i, subchunk in enumerate(subchunks):
-            _log(f"Processing chunk {i+1}/{len(subchunks)}")
-            for m in PRETOK_PAT.finditer(subchunk):
+        buf = ""
+        total_docs = 0
+        while nbytes_to_read > 0:
+            read_buffer_size = min(nbytes_to_read, 10*1024*1024)
+            chunk = inp.read(read_buffer_size)
+            if chunk == '': # EOF
+                break
+            nbytes_to_read -= len(chunk)
+            assert nbytes_to_read >= 0, f'Ended up with negative nchars_to_read={nbytes_to_read}'
+
+            buf += dec.decode(chunk)
+            parts = spre.split(buf)
+            _log(f'Found {len(parts) - 1} documents')
+            # Exclude the last part, as it might be a partial doc.
+            for part in parts[:-1]:
+                total_docs += 1
+                for m in PRETOK_PAT.finditer(part):
+                    b = m.group().encode("utf-8")
+                    outp.write(struct.pack("<I", len(b)))
+                    outp.write(b)
+            buf = parts[-1]
+        if buf:
+            total_docs += 1
+            for m in PRETOK_PAT.finditer(buf):
                 b = m.group().encode("utf-8")
                 outp.write(struct.pack("<I", len(b)))
                 outp.write(b)
-    _log(f"Chunk reading ended on range {params.startpos}..{params.limitpos}, wrote {params.output_path}")
+
+    _log(f"Chunk reading ended on range {params.startpos}..{params.limitpos} (total {total_docs} docs), wrote {params.output_path}")
 
 
 def read_pretokens(input_path: os.PathLike, separator: str, special_tokens: list[str], /, parallelism: int = os.cpu_count()):
