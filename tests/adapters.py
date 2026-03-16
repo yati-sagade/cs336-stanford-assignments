@@ -8,7 +8,7 @@ import numpy.typing as npt
 import torch
 from jaxtyping import Bool, Float, Int
 from torch import Tensor
-from cs336_basics.tokenization import BytePairEncodingTokenizer, read_pretokens
+from cs336_basics.tokenization import BpeTrainer, read_pretokens, Tokenizer
 
 
 def run_linear(
@@ -560,7 +560,7 @@ def get_tokenizer(
     Returns:
         A BPE tokenizer that uses the provided vocab, merges, and special tokens.
     """
-    raise NotImplementedError
+    return Tokenizer(vocab=vocab, merges=merges, special_tokens=special_tokens)
 
 
 def run_train_bpe(
@@ -591,7 +591,7 @@ def run_train_bpe(
                 Merges are ordered by order of creation.
     """
     pretokens, cleanup = read_pretokens(input_path, "<|endoftext|>", special_tokens, parallelism=4)
-    bpe = BytePairEncodingTokenizer(
+    bpe = BpeTrainer(
         special_tokens=[t.encode("utf-8") for t in special_tokens], max_vocab_size=vocab_size
     )
     bpe.fit(pretokens)

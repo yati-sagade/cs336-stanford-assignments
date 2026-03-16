@@ -1,4 +1,6 @@
 import codecs
+from os import PathLike
+from pathlib import Path
 import cbor2
 import argparse
 import shutil
@@ -14,13 +16,16 @@ from dataclasses import dataclass
 from pprint import pformat
 from collections import Counter, defaultdict
 from collections.abc import Iterator
-from typing import BinaryIO
+from typing import BinaryIO, Iterable
 import multiprocessing
 
 log = logging.getLogger(__name__)
-logging.basicConfig(level=getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper()))
+logging.basicConfig(level=getattr(logging,
+                                  os.getenv("LOG_LEVEL", "INFO").upper()))
 
-PRETOK_PAT = re.compile(r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+""")
+PRETOK_PAT = re.compile(
+    r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+)
 SPECIAL_TOK_PAT = re.compile(r"<\|endoftext\|>")
 END_OF_TEXT_TOKEN = b"<|endoftext|>"
 
@@ -30,11 +35,45 @@ TokenPair = tuple[TokenID, TokenID]
 Pretoken = tuple[TokenID, ...]
 
 
-class BytePairEncodingTokenizer:
-    def __init__(self, *, max_vocab_size: int = None, num_merges: int = None, special_tokens: list[bytes] = None):
+class BpeTokenizer:
+    ENABLE_SPECIAL_TOKENS = False
+
+    def __init__(self,
+                 vocab: dict[int, Token],
+                 merges: list[tuple[bytes, bytes]],
+                 special_tokens: list[str] = None):
+        self._vocab = vocab
+        self._atoi = {v: i for i, v in self._vocab.items()}
+        self._merges = merges
+        self._spre = None
+        if self.ENABLE_SPECIAL_TOKENS and special_tokens is not None:
+            self._spre = re.compile(r'({})'.format('|'.join(
+                map(re.escape, special_tokens))))
+            next_id = max(self._vocab.keys()) + 1
+            for t in special_tokens:
+                if t in self._vocab:
+                    continue
+                self._vocab[t] = next_id
+                next_id += 1
+                self._atoi[id] = t
+
+    def encode(self, s: str) -> list[int]:
+        if self.ENABLE_SPECIAL_TOKENS:
+            # TODO
+            pass
+        for t in PRETOK_PAT.finditer(s):
+            tb = t.encode('utf-8')
+
+
+class BpeTrainer:
+
+    def __init__(self,
+                 *,
+                 max_vocab_size: int = None,
+                 num_merges: int = None,
+                 special_tokens: list[bytes] = None):
         assert (num_merges is not None) != (max_vocab_size is not None), (
-            "Exactly one of num_merges and max_vocab_size must be provided"
-        )
+            "Exactly one of num_merges and max_vocab_size must be provided")
         # Each vocab item is called a Token, and is just a sequence of bytes.
         self._vocab: list[Token] = []
         # Map from vocab item to its index in self._vocab.
@@ -79,7 +118,8 @@ class BytePairEncodingTokenizer:
 
     def fit(self, pretokens: Iterator[bytes]):
         for pretoken, count in Counter(pretokens).items():
-            pretoken_enc = tuple(self._btoi[bytes([b])] for b in pretoken.encode("utf-8"))
+            pretoken_enc = tuple(self._btoi[bytes([b])]
+                                 for b in pretoken.encode("utf-8"))
             pretoken_idx = len(self._corpus)
             self._corpus.append(pretoken_enc)
             self._corpus_counts.append(count)
@@ -108,12 +148,15 @@ class BytePairEncodingTokenizer:
     def _merge(self):
         best_pair, _ = max(self._pair_counts.items(), key=self._maxkey)
         besta, bestb = best_pair
-        new_token_id = self._add_to_vocab(self._vocab[besta] + self._vocab[bestb])
+        new_token_id = self._add_to_vocab(self._vocab[besta] +
+                                          self._vocab[bestb])
         self._merges.append((besta, bestb, new_token_id))
         # log.debug(f"*** Going to merge pair {pformat(best_pair)}")
-        best_pair_postings: list[TokenID] = self._pair_postings[best_pair].copy()
+        best_pair_postings: list[TokenID] = self._pair_postings[
+            best_pair].copy()
         for itok in best_pair_postings:
-            rewritten_pretoken = self._rewrite_pretoken(itok, best_pair, new_token_id)
+            rewritten_pretoken = self._rewrite_pretoken(
+                itok, best_pair, new_token_id)
             # log.debug(f"*** Rewrote {pretoken} to {rewritten_pretoken}")
             self._corpus[itok] = rewritten_pretoken
         # Finally, remove the best pair
@@ -121,9 +164,9 @@ class BytePairEncodingTokenizer:
         self._pair_counts.pop(best_pair)
         return best_pair
 
-    def _rewrite_pretoken(
-        self, pretoken_id: int, pair_to_merge: tuple[TokenID, TokenID], new_token_id: TokenID
-    ) -> tuple[TokenID, ...]:
+    def _rewrite_pretoken(self, pretoken_id: int,
+                          pair_to_merge: tuple[TokenID, TokenID],
+                          new_token_id: TokenID) -> tuple[TokenID, ...]:
         merged = []
         skip_one = False
         pretoken = self._corpus[pretoken_id]
@@ -171,7 +214,8 @@ def find_chunk_boundaries(
     Chunk the file into parts that can be counted independently.
     May return fewer chunks if the boundaries end up overlapping.
     """
-    assert isinstance(split_special_token, bytes), "Must represent special token as a bytestring"
+    assert isinstance(split_special_token,
+                      bytes), "Must represent special token as a bytestring"
 
     # Get total file size in bytes
     file.seek(0, os.SEEK_END)
@@ -224,11 +268,14 @@ def _process_chunk(input: tuple[int, ChunkParams]):
 
     def _log(msg):
         print(f"[process {idx}/pid {pid}] {msg}")
+
     if os.environ.get('LOG_LEVEL', '').lower() != 'debug':
         _log = lambda *args, **kwargs: None
 
     spre = re.compile("|".join(map(re.escape, params.special_tokens)))
-    _log(f"Chunk processing started on range {params.startpos}..{params.limitpos}")
+    _log(
+        f"Chunk processing started on range {params.startpos}..{params.limitpos}"
+    )
     nbytes_to_read = params.limitpos - params.startpos
     assert nbytes_to_read > 0, f"Empty chunk assigned to process {idx}/pid {pid}. params: {params}"
     total_read = 0
@@ -239,9 +286,9 @@ def _process_chunk(input: tuple[int, ChunkParams]):
         buf = ""
         total_docs = 0
         while nbytes_to_read > 0:
-            read_buffer_size = min(nbytes_to_read, 10*1024*1024)
+            read_buffer_size = min(nbytes_to_read, 10 * 1024 * 1024)
             chunk = inp.read(read_buffer_size)
-            if chunk == '': # EOF
+            if chunk == '':  # EOF
                 break
             nbytes_to_read -= len(chunk)
             assert nbytes_to_read >= 0, f'Ended up with negative nchars_to_read={nbytes_to_read}'
@@ -264,13 +311,22 @@ def _process_chunk(input: tuple[int, ChunkParams]):
                 outp.write(struct.pack("<I", len(b)))
                 outp.write(b)
 
-    _log(f"Chunk reading ended on range {params.startpos}..{params.limitpos} (total {total_docs} docs), wrote {params.output_path}")
+    _log(
+        f"Chunk reading ended on range {params.startpos}..{params.limitpos} (total {total_docs} docs), wrote {params.output_path}"
+    )
 
 
-def read_pretokens(input_path: os.PathLike, separator: str, special_tokens: list[str], /, parallelism: int = os.cpu_count()):
+def read_pretokens(input_path: os.PathLike,
+                   separator: str,
+                   special_tokens: list[str],
+                   /,
+                   parallelism: int = os.cpu_count()):
     with open(input_path, "rb") as fp:
-        chunk_boundaries = find_chunk_boundaries(fp, parallelism, separator.encode("utf-8"))
-        log.debug(f"Chunk boundaries for {input_path}: {chunk_boundaries} ({len(chunk_boundaries)} items)")
+        chunk_boundaries = find_chunk_boundaries(fp, parallelism,
+                                                 separator.encode("utf-8"))
+        log.debug(
+            f"Chunk boundaries for {input_path}: {chunk_boundaries} ({len(chunk_boundaries)} items)"
+        )
     # Each of the N (=parallelism) processes outputs pretokens in a separate file in a temp location.
     # Each pretoken is encoded as:
     #   <4-byte-little-endian-length><pretoken-utf-8-bytes>
@@ -279,12 +335,13 @@ def read_pretokens(input_path: os.PathLike, separator: str, special_tokens: list
     chunk_inputs = [
         ChunkParams(
             input_path=input_path,
-            output_path=os.path.join(tempdir.name, f"bpe-chunk-{startpos}-{limitpos}.txt"),
+            output_path=os.path.join(tempdir.name,
+                                     f"bpe-chunk-{startpos}-{limitpos}.txt"),
             startpos=startpos,
             limitpos=limitpos,
             special_tokens=special_tokens,
-        )
-        for startpos, limitpos in zip(chunk_boundaries[:-1], chunk_boundaries[1:])
+        ) for startpos, limitpos in zip(chunk_boundaries[:-1],
+                                        chunk_boundaries[1:])
     ]
     with multiprocessing.Pool(parallelism) as p:
         p.map(_process_chunk, enumerate(chunk_inputs))
@@ -296,7 +353,7 @@ def read_pretokens(input_path: os.PathLike, separator: str, special_tokens: list
                 if not header:
                     break
                 assert len(header) == 4, f"Unexpected EOF in {path}"
-                (length,) = struct.unpack("<I", header)
+                (length, ) = struct.unpack("<I", header)
                 pretoken = fp.read(length)
                 yield pretoken.decode("utf-8")
 
@@ -304,21 +361,118 @@ def read_pretokens(input_path: os.PathLike, separator: str, special_tokens: list
     return itertools.chain(*gens), tempdir.cleanup
 
 
+def load_tokenizer(dir: PathLike, special_tokens: list[str] = None):
+    dir = Path(dir)
+    with open(dir / "merges.cbor", "rb") as mf:
+        merges = cbor2.load(mf)
+    with open(dir / "vocab.cbor", "rb") as vf:
+        vocab = cbor2.load(vf)
+    return Tokenizer(vocab=vocab, merges=merges, special_tokens=special_tokens)
+
+
+class Tokenizer:
+
+    def __init__(self,
+                 vocab: dict[int, bytes],
+                 merges: list[tuple[bytes, bytes]],
+                 special_tokens: list[str] = None):
+        self._vocab = vocab
+        self._merges = merges
+        self._merges_dict = {tuple(m): i for i, m in enumerate(merges)}
+        self._atoi = {b: i for i, b in vocab.items()}
+        self._special_tokens = special_tokens
+        self._split_input = lambda s: [s]
+        if self._special_tokens:
+            # Note the parens around the regexp, e.g., (special_1|special_2|...).
+            # This is required to preserve the delimiters (special tokens) when we split using the pattern.
+            # We order the special tokens from larger to smaller to greedily split on potentially
+            # overlapping patterns.
+            _special_tokens_pat = re.compile(f"({'|'.join(map(re.escape,
+                                                              sorted(self._special_tokens,
+                                                                     key=len,
+                                                                     reverse=True)))})")
+            self._split_input = _special_tokens_pat.split
+            nextid = max(self._vocab.keys()) + 1
+            for t in self._special_tokens:
+                tb = t.encode("utf-8")
+                if tb not in self._atoi:
+                    self._vocab[nextid] = tb
+                    self._atoi[tb] = nextid
+                    nextid += 1
+    
+    def encode(self, s: str) -> list[int]:
+        ret = []
+        parts = self._split_input(s)
+        for i, part in enumerate(parts):
+            if i % 2 == 0:
+                ret.extend(self._encode_nonspecial(part))
+            else:
+                ret.append(self._atoi[part.encode("utf-8")]) # Special token
+        return ret
+
+    def _encode_nonspecial(self, s: str) -> list[int]:
+        ret = []
+        for t in PRETOK_PAT.finditer(s):
+            tb = [bytes([b]) for b in t.group().encode('utf-8')]
+            ret.extend(self._merge(tb))
+        return [self._atoi[b] for b in ret]
+
+    def encode_iterable(self, strings: Iterable[str]) -> Iterator[int]:
+        for s in strings:
+            yield from self.encode(s)
+
+    def decode(self, t: list[int]) -> str:
+        return b''.join(self._vocab[i] for i in t).decode('utf-8',
+                                                          errors='replace')
+
+    def _merge_once(self, p: list[bytes]) -> list[bytes]:
+        l = [(self._merges_dict[a, b], (i, (a, b)))
+             for i, (a, b) in enumerate(zip(p[:-1], p[1:]))
+             if (a, b) in self._merges_dict]
+        if not l:
+            return p
+        _, (i, (a, b)) = min(l, key=lambda item: item[0])
+        ret = p[:i]
+        ret.append(p[i]+p[i+1])
+        ret.extend(p[i+2:])
+        return ret
+
+    def _merge(self, p: list[bytes]) -> list[bytes]:
+        more = True
+        ret = p
+        while True:
+            t = self._merge_once(ret)
+            if len(ret) == len(t):
+                break
+            ret = t
+        return ret
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("input_path")
     ap.add_argument("output_dir")
-    ap.add_argument("--overwrite", action="store_true", required=False, default=False)
+    ap.add_argument("--overwrite",
+                    action="store_true",
+                    required=False,
+                    default=False)
     ap.add_argument("--max_vocab_size", type=int, required=True)
-    ap.add_argument("--pretok_parallelism", type=int, required=False, default=os.cpu_count())
+    ap.add_argument("--pretok_parallelism",
+                    type=int,
+                    required=False,
+                    default=os.cpu_count())
     args = ap.parse_args()
 
     if os.path.exists(args.output_dir):
         if args.overwrite:
-            print(f"*** Output dir {args.output_dir} already exists. REMOVING due to --overwrite.")
+            print(
+                f"*** Output dir {args.output_dir} already exists. REMOVING due to --overwrite."
+            )
             shutil.rmtree(args.output_dir)
         else:
-            print(f"*** Output dir {args.output_dir} already exists, specify --overwrite to overwrite.")
+            print(
+                f"*** Output dir {args.output_dir} already exists, specify --overwrite to overwrite."
+            )
             sys.exit(1)
     print(f"*** Creating {args.output_dir}")
     os.makedirs(args.output_dir)
@@ -330,15 +484,17 @@ if __name__ == "__main__":
         log.debug("Starting pretokenization")
         t_start = time.time()
         pretokens, cleanup_pretoken_state = read_pretokens(
-            args.input_path, "<|endoftext|>", ["<|endoftext|>"], parallelism=args.pretok_parallelism
-        )
+            args.input_path,
+            "<|endoftext|>", ["<|endoftext|>"],
+            parallelism=args.pretok_parallelism)
         cleanup_fns.append(cleanup_pretoken_state)
         t_end = time.time()
         log.debug(f"Pretokenization done in {t_end - t_start:0.4f}s")
 
         log.debug("Pretokenization done, starting BPE training")
         t_start = time.time()
-        tok = BytePairEncodingTokenizer(max_vocab_size=args.max_vocab_size, special_tokens=special_tokens)
+        tok = BpeTrainer(max_vocab_size=args.max_vocab_size,
+                         special_tokens=special_tokens)
         tok.fit(pretokens)
         t_end = time.time()
         log.debug(f"BPE training done in {t_end - t_start:0.4f}s")
@@ -356,4 +512,6 @@ if __name__ == "__main__":
                 try:
                     fn()
                 except Exception as e:
-                    print(f"*** Exception while executing cleanup handler: {e}. Continuing with other handlers.")
+                    print(
+                        f"*** Exception while executing cleanup handler: {e}. Continuing with other handlers."
+                    )
